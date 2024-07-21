@@ -62,7 +62,7 @@ f_round(octa x, int sign, int rounding) {
 	return x;
 }
 
-
+/* pack a float */
 octa
 fpack(Float f, int rounding, unsigned *exceptions) {
     octa o;
@@ -90,7 +90,7 @@ fpack(Float f, int rounding, unsigned *exceptions) {
     }
 
     /* Round and return the result */
-    // use the last 2 bits of inexact detection
+    // use the last 2 bits for inexact detection
     if (o & 0b11) {
         *exceptions |= FLOAT_INEXACT;
     }
@@ -109,12 +109,63 @@ fpack(Float f, int rounding, unsigned *exceptions) {
     if (f.s == '-')
         o |= MSB(64);
 
-    return 0;
+    return o;
 }
 
+/* pack a short float */
 tetra
 sfpack(Float f, int rounding, unsigned *exceptions) {
+    tetra o;
+	// 0x47D - 0x380 = 0xFD -> exponent = 1...1
+    if (f.e > 0x47D) {
+        f.e = 0x47F;
+        o = 0;
+    } else {
+        // keep 2 bits behind the 23-bit fraction
+        o = f.f >> 29;
+        // if the lower bits are are set in the fraction, its inexact
+        if (f.f & 0x1FFFFFFF)
+            o |= 1;
+        // negative e means unnormalized
+        if (f.e < 0x380)  {
+            if (f.e < 0x380 - 25) { // larger than short
+                o = 1;
+            } else {
+                // divide by exponent and multiply again
+                tetra o0, oo;
+                o0 = o;
+                o = o >> (0x380 - f.e);
+                oo = o << (0x380 - f.e);
+                // if the result is different, it's inexact
+                if (oo != o0)
+                    o |= 1;
 
+            }
+            // keep it unnormalized
+            f.e = 0x380;
+        }
+    }
+
+    // use the last 2 bits for inexact detection
+    if (o & 0b11) {
+        *exceptions |= FLOAT_INEXACT;
+    }
+    o = f_round(o, f.s, rounding);
+
+    // shift fraction back (see unpack) and add exponent
+	o >>= 2;
+	// add 1 to e by the addition because the fraction has bit 2^25 set
+	o += (f.e - 0x380) << 23;
+
+    if (o >= max_float)
+        *exceptions |= FLOAT_OVERFLOW + FLOAT_INEXACT;
+    else if (o < min_float)
+        *exceptions |= FLOAT_UNDERFLOW;
+
+    if (f.s == '-')
+        o |= MSB(32);
+
+    return o;
 }
 
 
