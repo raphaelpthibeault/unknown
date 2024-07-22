@@ -33,13 +33,14 @@ static const octa standard_NaN =0x7FF8000000000000;
 
 
 typedef enum {
-    zro, num, inf , nan
+    ZERO, NUM, INF, NAN
 } ftype;
 
 typedef struct {
     octa f;                     // the normalized fraction part
     int e;                      // the raw exponent
     int s;                      // the sign
+    ftype type;                 
 } Float;
 
 octa
@@ -168,6 +169,75 @@ sfpack(Float f, int rounding, unsigned *exceptions) {
     return o;
 }
 
+Float funpack(octa x) {
+    Float f;
+    int ee;
+    f.s = (x & MSB(64)) ? '-' : '+';
+    f.f = x << 2;
+    f.f &= 0x0003FFFFFFFFFFFFF;
+	ee = (x >> 52) & 0x7FF;
+
+    if (ee) { // normalized float
+        f.e = ee - 1;
+		f.f |= 0x40000000000000;
+        if (ee < 0x7FF) {
+            f.type = NUM;
+        } else if (f.f == 0x40000000000000) { // exponent is 1...1; if fraction is zero, its infinitive
+            f.type = INF;
+        } else {
+            f.type = NAN;
+        }
+    } else if (f.f == 0) { // unnormalized float AND fraction is 0
+        f.e = ZERO_EXPONENT;
+        f.type = ZERO;
+    } else { // unnormalized float
+        // normalize it by shifting the fraction left and decrementing the exponent until the
+		// leftmost bit of the fraction is set
+        do {
+            --ee;
+            f.f <<= 1;
+        } while (!(f.f & 0x40000000000000));
+        f.e = ee;
+        f.type = NUM;
+    }
+
+    return f;
+}
+
+Float sfunpack(tetra x) {
+    Float f;
+    int ee;
+	f.s = (x & MSB(32)) ? '-' : '+';
+	// the first 22 bit fraction are put into the upper half of fl.f
+	// the LSB is put into the MSB of the lower part
+	f.f = (octa)(x & 0x7FFFFF) << 31;
+	ee = (x >> 23) & 0xFF;
+    if (ee) {
+		// 0x380 + 127 (bias of 32-bit floats) = 1023 (bias of 64-bit floats)
+		f.e = ee + 0x380 - 1;
+		f.f |= 0x40000000000000;
+		if(ee < 0xFF) {
+			f.type = NUM;
+        } else if((x & 0x7FFFFFFF) == 0x7F800000) { // exponent is 1...1; if fraction is zero, its infinitive
+			f.type = INF;
+        }
+		else {
+			f.type = NAN;
+        }
+    } else if (!(x & 0x7FFFFFFF)) { // unnormalized float and fraction is 0
+        f.e = ZERO_EXPONENT;
+        f.type = ZERO;
+    } else { // unnormalized float 
+        do { 
+            --ee;
+            f.f <<= 1;
+        } while (!(f.f & 0x40000000000000));
+        f.e = ee + 0x380;
+        f.type = NUM;
+    }
+
+    return f;
+}
 
 
 int main() {
